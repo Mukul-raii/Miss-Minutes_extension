@@ -1,0 +1,49 @@
+# Node dependencies
+node_modules/
+
+# Output folders
+out/
+dist/
+build/
+
+# VSCE packaging output
+*.vsix
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+debug.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# TypeScript build cache
+*.tsbuildinfo
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Webpack / Rollup cache
+.cache/
+.esbuild/
+
+# VS Code workspace
+.vscode-test/
+.vscode/
+*.code-workspace
+
+# Coverage
+coverage/
+
+# Optional: macOS metadata
+*.swp
+*.swo
+
+# Optional: compiled source maps
+*.map
