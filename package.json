@@ -1,13 +1,25 @@
 {
   "name": "codechrono-extension",
-  "displayName": "CodeChrono",
-  "description": "Coding Time Tracker",
+  "displayName": "CodeChrono - Time Tracker",
+  "description": "Automatic coding time tracker with git integration and analytics",
   "version": "0.0.1",
+  "publisher": "codechrono",
   "engines": {
     "vscode": "^1.80.0"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Mukul-raii/CodeChrono.git"
+  },
   "categories": [
     "Other"
+  ],
+  "keywords": [
+    "time tracking",
+    "productivity",
+    "analytics",
+    "git",
+    "coding stats"
   ],
   "activationEvents": [
     "onStartupFinished"
@@ -16,8 +28,12 @@
   "contributes": {
     "commands": [
       {
+        "command": "codechrono.setApiKey",
+        "title": "CodeChrono: Set API Key"
+      },
+      {
         "command": "codechrono.helloWorld",
-        "title": "Hello World"
+        "title": "CodeChrono: Hello World"
       }
     ]
   },
