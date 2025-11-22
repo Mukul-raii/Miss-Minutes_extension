@@ -16,6 +16,9 @@ export class GitTracker {
   // gitRoot -> commitHash
   private currentCommit: Map<string, string> = new Map();
 
+  // gitRoot -> branch name
+  private currentBranch: Map<string, string> = new Map();
+
   // Set of known git roots
   private gitRoots: Set<string> = new Set();
 
@@ -178,6 +181,9 @@ export class GitTracker {
     }
 
     this.currentCommit.set(gitRoot, newCommit);
+    if (branch) {
+      this.currentBranch.set(gitRoot, branch);
+    }
   }
 
   // -------------------------------------------------------
@@ -200,6 +206,10 @@ export class GitTracker {
 
         const details = await this.getCommitDetails(root, commit);
         const branch = await this.getBranch(root);
+
+        if (branch) {
+          this.currentBranch.set(root, branch);
+        }
 
         if (details) {
           await this.database.insertCommit({
@@ -266,6 +276,27 @@ export class GitTracker {
   // Backwards compatibility
   public getActiveCommit(projectPath: string): string | undefined {
     return this.getActiveCommitForPath(projectPath);
+  }
+
+  /**
+   * Get active branch for a given file path
+   */
+  public getActiveBranchForPath(fsPath: string): string | undefined {
+    let bestMatch: string | undefined;
+
+    for (const root of this.gitRoots) {
+      if (
+        fsPath === root ||
+        fsPath.startsWith(root + path.sep) ||
+        fsPath.startsWith(root + "/")
+      ) {
+        if (!bestMatch || root.length > bestMatch.length) {
+          bestMatch = root;
+        }
+      }
+    }
+
+    return bestMatch ? this.currentBranch.get(bestMatch) : undefined;
   }
 
   public getGitRootForPath(fsPath: string): string | undefined {

@@ -1,6 +1,10 @@
 import { GraphQLClient, gql } from "graphql-request";
 import { Logger } from "../utils/logger";
-import { ActivityLog, GitCommit } from "../storage/database";
+import {
+  ActivityLog,
+  GitCommit,
+  FileActivitySummary,
+} from "../storage/database";
 
 export class ApiClient {
   private client: GraphQLClient;
@@ -93,6 +97,54 @@ export class ApiClient {
       return true;
     } catch (error) {
       this.logger.error("Failed to sync commits", error as Error);
+      return false;
+    }
+  }
+
+  /**
+   * Sync aggregated file activity summaries (grouped by commit, branch, and file)
+   * This is the new preferred method instead of syncing individual activities
+   */
+  public async syncFileActivities(
+    summaries: FileActivitySummary[]
+  ): Promise<boolean> {
+    if (summaries.length === 0) {
+      return true;
+    }
+
+    const mutation = gql`
+      mutation SyncFileActivities($input: [FileActivityInput!]!) {
+        syncFileActivities(input: $input) {
+          success
+          message
+        }
+      }
+    `;
+
+    const input = summaries.map((summary) => ({
+      projectPath: summary.projectPath,
+      commitHash: summary.commitHash,
+      branch: summary.branch,
+      filePath: summary.filePath,
+      language: summary.language,
+      totalDuration: summary.totalDuration,
+      activityCount: summary.activityCount,
+      firstActivityAt: summary.firstActivityAt,
+      lastActivityAt: summary.lastActivityAt,
+      editor: summary.editor,
+    }));
+
+    try {
+      await this.client.request(mutation, { input });
+      this.logger.info(
+        `Synced file activity: ${input[0].commitHash}||${input[0].branch}||${input[0].filePath}`
+      );
+      this.logger.info(
+        `Synced ${summaries.length} file activity summaries to ${this.endpoint}`
+      );
+      return true;
+    } catch (error) {
+      this.logger.error("Failed to sync file activities", error as Error);
       return false;
     }
   }

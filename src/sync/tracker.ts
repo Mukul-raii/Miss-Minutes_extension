@@ -125,11 +125,14 @@ export class Tracker {
       projectPath =
         vscode.workspace.getWorkspaceFolder(doc.uri)?.uri.fsPath || "";
     }
-    // Ask GitTracker for commit based on real file path
+    // Ask GitTracker for commit and branch based on real file path
     const commitHash =
       this.gitTracker?.getActiveCommitForPath(filePath) ?? undefined;
+    const branch =
+      this.gitTracker?.getActiveBranchForPath(filePath) ?? undefined;
+
     this.logger.debug(
-      `Tracking activity: ${filePath} | ${language} | ${duration}ms | commitHash: ${commitHash}`
+      `Tracking activity: ${filePath} | ${language} | ${duration}ms | commit: ${commitHash} | branch: ${branch}`
     );
     if (!commitHash && projectPath) {
       this.logger.debug(
@@ -145,6 +148,7 @@ export class Tracker {
       duration,
       editor: "vscode",
       commitHash,
+      branch,
     };
 
     this.queue.push(log);
@@ -170,18 +174,18 @@ export class Tracker {
 
     // Sync DB to API
     try {
-      // Sync activity logs
-      const logs = await this.db.getUnsyncedLogs(50);
-      if (logs.length > 0) {
-        this.logger.debug(`Syncing ${logs.length} activity logs`);
-        const success = await this.apiClient.syncActivities(logs);
+      // Sync aggregated file activities
+      const aggregatedActivities = await this.db.getAggregatedActivities(50);
+      if (aggregatedActivities.length > 0) {
+        this.logger.debug(
+          `Syncing ${aggregatedActivities.length} aggregated file activities`
+        );
+        const success = await this.apiClient.syncFileActivities(
+          aggregatedActivities
+        );
         if (success) {
-          const ids = logs
-            .map((l) => l.id!)
-            .filter((id): id is number => id !== undefined);
-          if (ids.length > 0) {
-            await this.db.deleteLogs(ids);
-          }
+          // Delete the individual activity logs that were aggregated
+          await this.db.deleteAggregatedActivities(aggregatedActivities);
           this.statusBarManager.updateStatus("CodeChrono: Synced");
         } else {
           this.statusBarManager.updateStatus("CodeChrono: Offline");
