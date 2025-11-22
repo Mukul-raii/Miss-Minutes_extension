@@ -2,6 +2,7 @@ import * as sqlite3 from "sqlite3";
 import * as path from "path";
 import * as fs from "fs";
 import { Logger } from "../utils/logger";
+import { g } from "@clerk/clerk-react/dist/useAuth-DEP6m3So";
 // Structure: "Store-and-Forward" Buffer
 // 1. Local DB acts as a flat buffer for activity logs.
 // 2. We sync these logs to the backend, which handles Project organization.

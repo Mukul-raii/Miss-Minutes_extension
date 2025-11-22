@@ -2,7 +2,7 @@
   "name": "codechrono-extension",
   "displayName": "CodeChrono - Time Tracker",
   "description": "Automatic coding time tracker with git integration and analytics",
-  "version": "0.0.4",
+  "version": "0.0.3",
   "publisher": "Mukulrai",
   "engines": {
     "vscode": "^1.80.0"

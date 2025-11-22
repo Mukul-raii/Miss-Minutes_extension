@@ -46,6 +46,9 @@ export class ApiClient {
 
     try {
       await this.client.request(mutation, { input });
+      this.logger.info(
+        `Synced ${input[0].commitHash}||${input[0].filePath}||${input[0].projectPath} `
+      );
       this.logger.info(`Synced ${logs.length} activities to ${this.endpoint}`);
       return true;
     } catch (error) {
@@ -83,6 +86,9 @@ export class ApiClient {
 
     try {
       await this.client.request(mutation, { input });
+      this.logger.info(
+        `Synced ${input[0].author}||${input[0].commitHash}||${input[0].projectPath}  `
+      );
       this.logger.info(`Synced ${commits.length} commits to ${this.endpoint}`);
       return true;
     } catch (error) {

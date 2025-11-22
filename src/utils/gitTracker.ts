@@ -1,6 +1,10 @@
+// src/utils/gitTracker.ts
 import * as vscode from "vscode";
-import { exec } from "child_process";
+import * as fs from "fs";
+import * as path from "path";
+import { exec, execSync } from "child_process";
 import { promisify } from "util";
+
 import { Logger } from "./logger";
 import { Database, GitCommit } from "../storage/database";
 
@@ -8,208 +12,277 @@ const execAsync = promisify(exec);
 
 export class GitTracker {
   private logger = Logger.getInstance();
-  private currentCommit: Map<string, string> = new Map(); // projectPath -> commitHash
-  private commitStartTime: Map<string, number> = new Map(); // commitHash -> startTime
+
+  // gitRoot -> commitHash
+  private currentCommit: Map<string, string> = new Map();
+
+  // Set of known git roots
+  private gitRoots: Set<string> = new Set();
 
   constructor(private database: Database) {}
 
-  /**
-   * Get the current git commit hash for a project
-   */
-  public async getCurrentCommit(projectPath: string): Promise<string | null> {
+  // -------------------------------------------------------
+  // 🔍 FIND ALL GIT ROOTS INSIDE WORKSPACE (MONOREPO SAFE)
+  // -------------------------------------------------------
+  private findGitRootsInWorkspace(): string[] {
+    const folders = vscode.workspace.workspaceFolders;
+    if (!folders) return [];
+
+    const roots = new Set<string>();
+
+    for (const folder of folders) {
+      const base = folder.uri.fsPath;
+
+      const stack: string[] = [base];
+
+      while (stack.length > 0) {
+        const current = stack.pop()!;
+        const gitDir = path.join(current, ".git");
+
+        try {
+          if (fs.existsSync(gitDir) && fs.statSync(gitDir).isDirectory()) {
+            roots.add(current);
+            continue; // do NOT scan deeper inside this repo
+          }
+        } catch {}
+
+        // Scan children folders
+        try {
+          const children = fs.readdirSync(current);
+          for (const child of children) {
+            const full = path.join(current, child);
+            if (fs.statSync(full).isDirectory()) {
+              stack.push(full);
+            }
+          }
+        } catch {}
+      }
+    }
+
+    return Array.from(roots);
+  }
+
+  // -------------------------------------------------------
+  // 🧠 GET CURRENT COMMIT
+  // -------------------------------------------------------
+  private async getCurrentCommit(gitRoot: string): Promise<string | null> {
     try {
       const { stdout } = await execAsync("git rev-parse HEAD", {
-        cwd: projectPath,
+        cwd: gitRoot,
       });
       return stdout.trim();
-    } catch (error) {
-      this.logger.debug(
-        `Not a git repository or error getting commit: ${projectPath}`
-      );
+    } catch {
       return null;
     }
   }
 
-  /**
-   * Get current branch name
-   */
-  public async getCurrentBranch(projectPath: string): Promise<string | null> {
+  // -------------------------------------------------------
+  // 🧠 GET BRANCH
+  // -------------------------------------------------------
+  private async getBranch(gitRoot: string): Promise<string | null> {
     try {
       const { stdout } = await execAsync("git branch --show-current", {
-        cwd: projectPath,
+        cwd: gitRoot,
       });
       return stdout.trim();
-    } catch (error) {
+    } catch {
       return null;
     }
   }
 
-  /**
-   * Get commit details
-   */
-  public async getCommitDetails(
-    projectPath: string,
-    commitHash: string
+  // -------------------------------------------------------
+  // 📦 GET COMMIT DETAILS (message, author, diff stats)
+  // -------------------------------------------------------
+  private async getCommitDetails(
+    gitRoot: string,
+    hash: string
   ): Promise<Partial<GitCommit> | null> {
     try {
-      const [messageResult, authorResult, emailResult, timestampResult] =
-        await Promise.all([
-          execAsync(`git log -1 --format=%s ${commitHash}`, {
-            cwd: projectPath,
-          }),
-          execAsync(`git log -1 --format=%an ${commitHash}`, {
-            cwd: projectPath,
-          }),
-          execAsync(`git log -1 --format=%ae ${commitHash}`, {
-            cwd: projectPath,
-          }),
-          execAsync(`git log -1 --format=%at ${commitHash}`, {
-            cwd: projectPath,
-          }),
-        ]);
+      const [msg, author, email, timestamp] = await Promise.all([
+        execAsync(`git log -1 --format=%s ${hash}`, { cwd: gitRoot }),
+        execAsync(`git log -1 --format=%an ${hash}`, { cwd: gitRoot }),
+        execAsync(`git log -1 --format=%ae ${hash}`, { cwd: gitRoot }),
+        execAsync(`git log -1 --format=%at ${hash}`, { cwd: gitRoot }),
+      ]);
 
-      const message = messageResult.stdout.trim();
-      const author = authorResult.stdout.trim();
-      const authorEmail = emailResult.stdout.trim();
-      const timestamp = parseInt(timestampResult.stdout.trim(), 10) * 1000; // Convert to ms
+      const message = msg.stdout.trim();
+      const authorName = author.stdout.trim();
+      const authorEmail = email.stdout.trim();
+      const timestampMs = parseInt(timestamp.stdout.trim(), 10) * 1000;
 
-      // Get diff stats
+      // diff stats
       const { stdout: diffStats } = await execAsync(
-        `git show --stat --format="" ${commitHash}`,
-        { cwd: projectPath }
+        `git show --stat --format="" ${hash}`,
+        { cwd: gitRoot }
       );
 
       const filesChanged = (diffStats.match(/\n/g) || []).length;
+
       let linesAdded = 0;
       let linesDeleted = 0;
 
-      const statsMatch = diffStats.match(/(\d+) insertion.*?(\d+) deletion/);
-      if (statsMatch) {
-        linesAdded = parseInt(statsMatch[1], 10) || 0;
-        linesDeleted = parseInt(statsMatch[2], 10) || 0;
+      const stats = diffStats.match(/(\d+) insertion.*?(\d+) deletion/);
+      if (stats) {
+        linesAdded = parseInt(stats[1], 10) || 0;
+        linesDeleted = parseInt(stats[2], 10) || 0;
       }
 
       return {
         message,
-        author,
+        author: authorName,
         authorEmail,
-        timestamp,
+        timestamp: timestampMs,
         filesChanged,
         linesAdded,
         linesDeleted,
       };
-    } catch (error) {
-      this.logger.error("Error getting commit details", error);
+    } catch (err) {
+      this.logger.error("Failed reading commit details", err);
       return null;
     }
   }
 
-  /**
-   * Track commit change and store in database
-   */
-  public async trackCommitChange(projectPath: string): Promise<void> {
-    const newCommit = await this.getCurrentCommit(projectPath);
-    if (!newCommit) {
-      return;
+  // -------------------------------------------------------
+  // 🔄 TRACK COMMIT CHANGE
+  // -------------------------------------------------------
+  public async trackCommitChange(gitRoot: string) {
+    const newCommit = await this.getCurrentCommit(gitRoot);
+    if (!newCommit) return;
+
+    const oldCommit = this.currentCommit.get(gitRoot);
+
+    if (oldCommit === newCommit) return;
+
+    this.logger.info(
+      `Commit changed (${gitRoot}): ${oldCommit} → ${newCommit}`
+    );
+
+    const details = await this.getCommitDetails(gitRoot, newCommit);
+    const branch = await this.getBranch(gitRoot);
+
+    if (details) {
+      const data: GitCommit = {
+        projectPath: gitRoot,
+        commitHash: newCommit,
+        message: details.message!,
+        author: details.author!,
+        authorEmail: details.authorEmail!,
+        timestamp: details.timestamp!,
+        filesChanged: details.filesChanged!,
+        linesAdded: details.linesAdded!,
+        linesDeleted: details.linesDeleted!,
+        branch: branch || undefined,
+      };
+
+      await this.database.insertCommit(data);
     }
 
-    const oldCommit = this.currentCommit.get(projectPath);
-
-    // If commit changed, save the new commit to database
-    if (oldCommit !== newCommit) {
-      this.logger.info(
-        `Commit changed for ${projectPath}: ${oldCommit} -> ${newCommit}`
-      );
-
-      const commitDetails = await this.getCommitDetails(projectPath, newCommit);
-      const branch = await this.getCurrentBranch(projectPath);
-
-      if (commitDetails) {
-        const commit: GitCommit = {
-          projectPath,
-          commitHash: newCommit,
-          message: commitDetails.message!,
-          author: commitDetails.author!,
-          authorEmail: commitDetails.authorEmail!,
-          timestamp: commitDetails.timestamp!,
-          filesChanged: commitDetails.filesChanged!,
-          linesAdded: commitDetails.linesAdded!,
-          linesDeleted: commitDetails.linesDeleted!,
-          branch: branch || undefined,
-        };
-
-        await this.database.insertCommit(commit);
-        this.logger.info(`Stored git commit: ${newCommit.substring(0, 8)}`);
-      }
-
-      this.currentCommit.set(projectPath, newCommit);
-      this.commitStartTime.set(newCommit, Date.now());
-    }
+    this.currentCommit.set(gitRoot, newCommit);
   }
 
-  /**
-   * Get current commit hash for activity logging
-   */
-  public getActiveCommit(projectPath: string): string | undefined {
-    return this.currentCommit.get(projectPath);
-  }
+  // -------------------------------------------------------
+  // 🚀 INITIALIZE ALL FOUND GIT ROOTS
+  // -------------------------------------------------------
+  public async initializeAllRoots() {
+    const roots = this.findGitRootsInWorkspace();
+    this.gitRoots = new Set(roots);
 
-  /**
-   * Initialize tracking for a project
-   */
-  public async initializeProject(projectPath: string): Promise<void> {
-    const commit = await this.getCurrentCommit(projectPath);
-    if (commit) {
-      this.currentCommit.set(projectPath, commit);
-      this.commitStartTime.set(commit, Date.now());
+    this.logger.info(
+      `GitTracker detected git roots: ${
+        roots.length > 0 ? roots.join(", ") : "None"
+      }`
+    );
 
-      // Store initial commit if not already stored
-      const commitDetails = await this.getCommitDetails(projectPath, commit);
-      const branch = await this.getCurrentBranch(projectPath);
+    for (const root of roots) {
+      const commit = await this.getCurrentCommit(root);
+      if (commit) {
+        this.currentCommit.set(root, commit);
 
-      if (commitDetails) {
-        const gitCommit: GitCommit = {
-          projectPath,
-          commitHash: commit,
-          message: commitDetails.message!,
-          author: commitDetails.author!,
-          authorEmail: commitDetails.authorEmail!,
-          timestamp: commitDetails.timestamp!,
-          filesChanged: commitDetails.filesChanged!,
-          linesAdded: commitDetails.linesAdded!,
-          linesDeleted: commitDetails.linesDeleted!,
-          branch: branch || undefined,
-        };
+        const details = await this.getCommitDetails(root, commit);
+        const branch = await this.getBranch(root);
 
-        await this.database.insertCommit(gitCommit);
+        if (details) {
+          await this.database.insertCommit({
+            projectPath: root,
+            commitHash: commit,
+            message: details.message!,
+            author: details.author!,
+            authorEmail: details.authorEmail!,
+            timestamp: details.timestamp!,
+            filesChanged: details.filesChanged!,
+            linesAdded: details.linesAdded!,
+            linesDeleted: details.linesDeleted!,
+            branch: branch || undefined,
+          });
+        }
       }
     }
   }
 
-  /**
-   * Watch for git changes in workspace
-   */
-  public watchGitChanges(context: vscode.ExtensionContext): void {
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (!workspaceFolders) {
-      return;
-    }
+  // -------------------------------------------------------
+  // 👀 WATCH GIT HEAD CHANGES
+  // -------------------------------------------------------
+  public async watchGitChanges(context: vscode.ExtensionContext) {
+    await this.initializeAllRoots();
 
-    // Watch for .git/HEAD changes to detect commit changes
-    workspaceFolders.forEach((folder) => {
-      const gitHeadPattern = new vscode.RelativePattern(
-        folder,
+    for (const root of this.gitRoots) {
+      const rootUri = vscode.Uri.file(root);
+
+      const pattern = new vscode.RelativePattern(
+        rootUri,
         ".git/{HEAD,refs/heads/**}"
       );
-      const watcher = vscode.workspace.createFileSystemWatcher(gitHeadPattern);
 
-      watcher.onDidChange(() => this.trackCommitChange(folder.uri.fsPath));
-      watcher.onDidCreate(() => this.trackCommitChange(folder.uri.fsPath));
+      const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+
+      watcher.onDidChange(() => this.trackCommitChange(root));
+      watcher.onDidCreate(() => this.trackCommitChange(root));
 
       context.subscriptions.push(watcher);
+    }
+  }
 
-      // Initialize tracking
-      this.initializeProject(folder.uri.fsPath);
-    });
+  // -------------------------------------------------------
+  // 🧩 RETURN COMMIT FOR A FILE PATH
+  // -------------------------------------------------------
+  public getActiveCommitForPath(fsPath: string): string | undefined {
+    let bestMatch: string | undefined;
+
+    for (const root of this.gitRoots) {
+      if (
+        fsPath === root ||
+        fsPath.startsWith(root + path.sep) ||
+        fsPath.startsWith(root + "/")
+      ) {
+        if (!bestMatch || root.length > bestMatch.length) {
+          bestMatch = root;
+        }
+      }
+    }
+
+    return bestMatch ? this.currentCommit.get(bestMatch) : undefined;
+  }
+
+  // Backwards compatibility
+  public getActiveCommit(projectPath: string): string | undefined {
+    return this.getActiveCommitForPath(projectPath);
+  }
+
+  public getGitRootForPath(fsPath: string): string | undefined {
+    let best: string | undefined;
+
+    for (const root of this.gitRoots) {
+      if (
+        fsPath === root ||
+        fsPath.startsWith(root + path.sep) ||
+        fsPath.startsWith(root + "/")
+      ) {
+        if (!best || root.length > best.length) {
+          best = root;
+        }
+      }
+    }
+
+    return best;
   }
 }

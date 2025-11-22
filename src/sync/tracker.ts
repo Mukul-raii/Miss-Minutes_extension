@@ -1,3 +1,4 @@
+// src/core/tracker.ts
 import * as vscode from "vscode";
 import { Logger } from "../utils/logger";
 import { StatusBarManager } from "./statusBarManger";
@@ -12,13 +13,13 @@ export class Tracker {
   private apiClient: ApiClient;
   private gitTracker: GitTracker | undefined;
   private disposable: vscode.Disposable | undefined;
-  private isTracking: boolean = false;
+  private isTracking = false;
   private queue: ActivityLog[] = [];
   private syncTimer: NodeJS.Timeout | undefined;
-  private lastActivityTime: number = 0;
-  private debounceInterval: number = 2000; // 2 seconds
-  private maxIdleTime: number = 5 * 60 * 1000; // 5 minutes
-  private syncInterval: number = 60000; // 60 seconds (1 minute)
+  private lastActivityTime = 0;
+  private debounceInterval = 2000; // 2 seconds
+  private maxIdleTime = 5 * 60 * 1000; // 5 minutes
+  private syncInterval = 60_000; // 60 seconds
 
   constructor(
     statusBarManager: StatusBarManager,
@@ -34,9 +35,8 @@ export class Tracker {
   }
 
   public startTracking() {
-    if (this.isTracking) {
-      return;
-    }
+    if (this.isTracking) return;
+
     this.isTracking = true;
     this.logger.info("Tracking started");
     this.statusBarManager.updateStatus("CodeChrono: Active");
@@ -66,9 +66,8 @@ export class Tracker {
   }
 
   public stopTracking() {
-    if (!this.isTracking) {
-      return;
-    }
+    if (!this.isTracking) return;
+
     this.isTracking = false;
     this.logger.info("Tracking stopped");
     this.statusBarManager.updateStatus("CodeChrono: Paused");
@@ -81,15 +80,15 @@ export class Tracker {
     }
   }
 
-  private onDocumentChange(event: vscode.TextDocumentChangeEvent) {
+  private onDocumentChange(_event: vscode.TextDocumentChangeEvent) {
     this.handleActivity();
   }
 
-  private onSelectionChange(event: vscode.TextEditorSelectionChangeEvent) {
+  private onSelectionChange(_event: vscode.TextEditorSelectionChangeEvent) {
     this.handleActivity();
   }
 
-  private onDocumentSave(document: vscode.TextDocument) {
+  private onDocumentSave(_document: vscode.TextDocument) {
     this.handleActivity();
   }
 
@@ -97,6 +96,7 @@ export class Tracker {
     const now = Date.now();
     const timeDiff = now - this.lastActivityTime;
 
+    // Debounce very rapid events
     if (timeDiff < this.debounceInterval) {
       return;
     }
@@ -110,25 +110,39 @@ export class Tracker {
     this.lastActivityTime = now;
 
     const editor = vscode.window.activeTextEditor;
-    if (!editor) {
-      return;
-    }
+    if (!editor) return;
 
     const doc = editor.document;
     const filePath = doc.fileName;
-    const projectPath =
-      vscode.workspace.getWorkspaceFolder(doc.uri)?.uri.fsPath || "";
-    const language = doc.languageId;
+    let projectPath = "";
 
-    // Get current commit hash if git tracker is available
-    const commitHash = this.gitTracker?.getActiveCommit(projectPath);
+    const language = doc.languageId;
+    const gitRoot = this.gitTracker?.getGitRootForPath(filePath);
+    if (gitRoot) {
+      projectPath = gitRoot; // ✅ TRUE PROJECT PATH
+    } else {
+      // fallback: workspace root
+      projectPath =
+        vscode.workspace.getWorkspaceFolder(doc.uri)?.uri.fsPath || "";
+    }
+    // Ask GitTracker for commit based on real file path
+    const commitHash =
+      this.gitTracker?.getActiveCommitForPath(filePath) ?? undefined;
+    this.logger.debug(
+      `Tracking activity: ${filePath} | ${language} | ${duration}ms | commitHash: ${commitHash}`
+    );
+    if (!commitHash && projectPath) {
+      this.logger.debug(
+        `No active commit found for file: ${filePath} (project: ${projectPath})`
+      );
+    }
 
     const log: ActivityLog = {
       projectPath,
       filePath,
       language,
       timestamp: now,
-      duration: duration,
+      duration,
       editor: "vscode",
       commitHash,
     };
@@ -144,6 +158,7 @@ export class Tracker {
     if (this.queue.length > 0) {
       const logsToSave = [...this.queue];
       this.queue = [];
+
       for (const log of logsToSave) {
         try {
           await this.db.insertActivity(log);
@@ -158,11 +173,15 @@ export class Tracker {
       // Sync activity logs
       const logs = await this.db.getUnsyncedLogs(50);
       if (logs.length > 0) {
-        console.log("Syncing logs:", logs);
+        this.logger.debug(`Syncing ${logs.length} activity logs`);
         const success = await this.apiClient.syncActivities(logs);
         if (success) {
-          const ids = logs.map((l) => l.id!).filter((id) => id !== undefined);
-          await this.db.deleteLogs(ids);
+          const ids = logs
+            .map((l) => l.id!)
+            .filter((id): id is number => id !== undefined);
+          if (ids.length > 0) {
+            await this.db.deleteLogs(ids);
+          }
           this.statusBarManager.updateStatus("CodeChrono: Synced");
         } else {
           this.statusBarManager.updateStatus("CodeChrono: Offline");
@@ -172,13 +191,15 @@ export class Tracker {
       // Sync git commits
       const commits = await this.db.getUnsyncedCommits(20);
       if (commits.length > 0) {
-        console.log("Syncing commits:", commits);
+        this.logger.debug(`Syncing ${commits.length} commits`);
         const success = await this.apiClient.syncCommits(commits);
         if (success) {
           const ids = commits
             .map((c) => c.id!)
-            .filter((id) => id !== undefined);
-          await this.db.deleteCommits(ids);
+            .filter((id): id is number => id !== undefined);
+          if (ids.length > 0) {
+            await this.db.deleteCommits(ids);
+          }
           this.logger.info(`Synced ${commits.length} commits`);
         }
       }
