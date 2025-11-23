@@ -11,7 +11,7 @@ export class ApiClient {
   private client: GraphQLClient;
   private logger = Logger.getInstance();
   // TODO: Make this configurable
-  private endpoint = "https://codechrono.mukulrai.me/api/graphql";
+  private endpoint = "https://miss-minutes.mukulrai.me/api/graphql";
 
   constructor(token?: string) {
     this.client = new GraphQLClient(this.endpoint, {
