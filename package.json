@@ -2,7 +2,7 @@
   "name": "miss-minutes",
   "displayName": "Miss-Minutes - Time Tracker",
   "description": "Automatic coding time tracker with git integration and analytics",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "publisher": "Mukulrai",
   "icon": "icon.png",
   "engines": {

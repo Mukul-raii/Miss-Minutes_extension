@@ -1,10 +1,10 @@
-import * as vscode from 'vscode';
+import * as vscode from "vscode";
 
 export enum LogLevel {
   DEBUG = 0,
   INFO = 1,
   WARN = 2,
-  ERROR = 3
+  ERROR = 3,
 }
 
 export class Logger {
@@ -13,7 +13,7 @@ export class Logger {
   private logLevel: LogLevel = LogLevel.INFO;
 
   private constructor() {
-    this.outputChannel = vscode.window.createOutputChannel('CodeChrono');
+    this.outputChannel = vscode.window.createOutputChannel("Miss-Minutes");
   }
 
   public static getInstance(): Logger {
@@ -47,7 +47,8 @@ export class Logger {
 
   public error(message: string, error?: any) {
     if (this.logLevel <= LogLevel.ERROR) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       this.log(`[ERROR] ${message}`, errorMessage);
       if (error instanceof Error && error.stack) {
         this.log(error.stack);
@@ -57,7 +58,9 @@ export class Logger {
 
   private log(message: string, ...args: any[]) {
     const timestamp = new Date().toISOString();
-    const formattedMessage = `${timestamp} ${message} ${args.length ? JSON.stringify(args) : ''}`;
+    const formattedMessage = `${timestamp} ${message} ${
+      args.length ? JSON.stringify(args) : ""
+    }`;
     console.log(formattedMessage); // Also log to debug console
     this.outputChannel.appendLine(formattedMessage);
   }

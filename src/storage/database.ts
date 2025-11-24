@@ -76,7 +76,7 @@ export class Database {
         fs.mkdirSync(this.storagePath, { recursive: true });
       }
 
-      const dbPath = path.join(this.storagePath, "codechrono.db");
+      const dbPath = path.join(this.storagePath, "miss-minutes.db");
       this.logger.info(`Initializing database at ${dbPath}`);
 
       this.db = new sqlite3.Database(dbPath, (err) => {

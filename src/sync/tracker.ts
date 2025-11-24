@@ -39,7 +39,7 @@ export class Tracker {
 
     this.isTracking = true;
     this.logger.info("Tracking started");
-    this.statusBarManager.updateStatus("CodeChrono: Active");
+    this.statusBarManager.updateStatus("Miss-Minutes: Active");
 
     const subscriptions: vscode.Disposable[] = [];
 
@@ -70,7 +70,7 @@ export class Tracker {
 
     this.isTracking = false;
     this.logger.info("Tracking stopped");
-    this.statusBarManager.updateStatus("CodeChrono: Paused");
+    this.statusBarManager.updateStatus("Miss-Minutes: Paused");
 
     if (this.disposable) {
       this.disposable.dispose();
@@ -152,7 +152,7 @@ export class Tracker {
     };
 
     this.queue.push(log);
-    this.statusBarManager.updateStatus("CodeChrono: Tracking...");
+    this.statusBarManager.updateStatus("Miss-Minutes: Tracking...");
   }
 
   private async syncLoop() {
@@ -216,9 +216,9 @@ export class Tracker {
           this.logger.info(
             `Synced ${aggregatedActivities.length} file activities`
           );
-          this.statusBarManager.updateStatus("CodeChrono: Synced");
+          this.statusBarManager.updateStatus("Miss-Minutes: Synced");
         } else {
-          this.statusBarManager.updateStatus("CodeChrono: Offline");
+          this.statusBarManager.updateStatus("Miss-Minutes: Offline");
         }
       }
 
